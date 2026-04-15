@@ -1,8 +1,8 @@
-C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\config\WebMvcConfig.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\controller\ArtworkController.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\controller\AuthController.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\model\User.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\repository\UserRepository.java
+C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\util\OtpUtils.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\repository\OrderRepository.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\AuraGalleryApplication.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\security\JwtUtils.java
@@ -10,4 +10,6 @@ C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\mode
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\repository\ArtworkRepository.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\controller\OrderController.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\model\Order.java
+C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\config\WebConfig.java
 C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\security\SecurityConfig.java
+C:\Users\Atharv\Desktop\aura-gallery\backend\src\main\java\com\aura\gallery\service\OtpService.java

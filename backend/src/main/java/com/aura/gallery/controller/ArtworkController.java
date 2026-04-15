@@ -17,6 +17,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@CrossOrigin(origins = "*")
 @RestController
 @RequestMapping("/api/artworks")
 public class ArtworkController {
@@ -27,6 +28,9 @@ public class ArtworkController {
     @Value("${aura.upload.dir}")
     private String uploadDir;
 
+    @Value("${aura.base.url:http://localhost:8080}")
+    private String baseUrl;
+
     // ── GET ALL ──────────────────────────────────
     @GetMapping
     public List<ArtworkDTO> getAllArtworks(
@@ -34,6 +38,7 @@ public class ArtworkController {
             @RequestParam(required = false) Boolean availableOnly) {
 
         List<Artwork> artworks;
+
         if (category != null) {
             Artwork.Category cat = Artwork.Category.valueOf(category);
             artworks = artworkRepo.findByCategoryOrderByCreatedAtDesc(cat);
@@ -42,6 +47,7 @@ public class ArtworkController {
         } else {
             artworks = artworkRepo.findAllByOrderByCreatedAtDesc();
         }
+
         return artworks.stream().map(this::toDTO).collect(Collectors.toList());
     }
 
@@ -68,27 +74,34 @@ public class ArtworkController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (artist.getRole() != User.Role.ARTIST) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Only artists can upload artworks");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Only artists can upload artworks");
         }
 
-        // Check for duplicate title (case-insensitive)
         boolean titleExists = artworkRepo.findAll().stream()
                 .anyMatch(a -> a.getTitle().equalsIgnoreCase(title));
+
         if (titleExists) {
-            return ResponseEntity.badRequest().body("An artwork with this title already exists. Please use a unique title.");
+            return ResponseEntity.badRequest()
+                    .body("An artwork with this title already exists. Please use a unique title.");
         }
 
-        // Save image file if provided
         String imagePath = null;
+
         if (image != null && !image.isEmpty()) {
             try {
                 Path uploadPath = Paths.get(uploadDir);
                 Files.createDirectories(uploadPath);
+
                 String filename = UUID.randomUUID() + "_" + image.getOriginalFilename()
                         .replaceAll("[^a-zA-Z0-9._-]", "_");
+
                 Path filePath = uploadPath.resolve(filename);
+
                 Files.copy(image.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+
                 imagePath = filename;
+
             } catch (IOException e) {
                 return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                         .body("Failed to save image: " + e.getMessage());
@@ -107,6 +120,7 @@ public class ArtworkController {
                 .build();
 
         artworkRepo.save(artwork);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(toDTO(artwork));
     }
 
@@ -123,11 +137,16 @@ public class ArtworkController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    // ── DELETE (artist can delete own) ───────────
+    // ── DELETE (artist can delete own, or with admin key) ───────────
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteArtwork(@PathVariable Long id, Authentication auth) {
+    public ResponseEntity<?> deleteArtwork(@PathVariable Long id, @RequestParam(required = false) String adminKey, Authentication auth) {
         return artworkRepo.findById(id).map(artwork -> {
-            if (!artwork.getArtist().getEmail().equals(auth.getName())) {
+            // Allow deletion if artist owns it or if correct admin key is provided
+            boolean isOwner = auth != null && auth.isAuthenticated() && 
+                             artwork.getArtist().getEmail().equals(auth.getName());
+            boolean isAdmin = adminKey != null && adminKey.equals("aura_admin_delete_2025");
+            
+            if (!isOwner && !isAdmin) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Not your artwork");
             }
             artworkRepo.delete(artwork);
@@ -139,31 +158,57 @@ public class ArtworkController {
     @GetMapping("/my")
     public List<ArtworkDTO> getMyArtworks(Authentication auth) {
         User artist = userRepo.findByEmail(auth.getName()).orElseThrow();
+
         return artworkRepo.findByArtistIdOrderByCreatedAtDesc(artist.getId())
-                .stream().map(this::toDTO).collect(Collectors.toList());
+                .stream()
+                .map(this::toDTO)
+                .collect(Collectors.toList());
     }
 
     // ── DTO MAPPING ───────────────────────────────
     private ArtworkDTO toDTO(Artwork a) {
+        String imageUrl = null;
+
+        if (a.getImagePath() != null) {
+            imageUrl = baseUrl + "/uploads/" + a.getImagePath();
+        }
+
         return new ArtworkDTO(
-            a.getId(), a.getTitle(),
-            a.getArtist().getName(), a.getArtist().getId(),
-            a.getCategory().name(), a.getPrice(),
-            a.getMedium(), a.getDescription(),
-            a.getImagePath() != null ? "/uploads/" + a.getImagePath() : null,
-            a.getSold(), a.getStock(), a.getCreatedAt() != null ? a.getCreatedAt().toString() : null
+                a.getId(),
+                a.getTitle(),
+                a.getArtist().getName(),
+                a.getArtist().getId(),
+                a.getCategory().name(),
+                a.getPrice(),
+                a.getMedium(),
+                a.getDescription(),
+                imageUrl,
+                a.getSold(),
+                a.getStock(),
+                a.getCreatedAt() != null ? a.getCreatedAt().toString() : null
         );
     }
 
     public static class ArtworkDTO {
-        Long id; String title; String artistName; Long artistId;
-        String category; Double price; String medium; String description;
-        String imageUrl; Boolean sold; Integer stock; String createdAt;
-        
+        Long id;
+        String title;
+        String artistName;
+        Long artistId;
+        String category;
+        Double price;
+        String medium;
+        String description;
+        String imageUrl;
+        Boolean sold;
+        Integer stock;
+        String createdAt;
+
         public ArtworkDTO() {}
+
         public ArtworkDTO(Long id, String title, String artistName, Long artistId,
-                String category, Double price, String medium, String description,
-                String imageUrl, Boolean sold, Integer stock, String createdAt) {
+                          String category, Double price, String medium, String description,
+                          String imageUrl, Boolean sold, Integer stock, String createdAt) {
+
             this.id = id;
             this.title = title;
             this.artistName = artistName;
@@ -177,28 +222,40 @@ public class ArtworkController {
             this.stock = stock;
             this.createdAt = createdAt;
         }
-        
+
         public Long getId() { return id; }
-        public Integer getStock() { return stock; }
         public void setId(Long id) { this.id = id; }
+
         public String getTitle() { return title; }
         public void setTitle(String title) { this.title = title; }
+
         public String getArtistName() { return artistName; }
         public void setArtistName(String artistName) { this.artistName = artistName; }
+
         public Long getArtistId() { return artistId; }
         public void setArtistId(Long artistId) { this.artistId = artistId; }
+
         public String getCategory() { return category; }
         public void setCategory(String category) { this.category = category; }
+
         public Double getPrice() { return price; }
         public void setPrice(Double price) { this.price = price; }
+
         public String getMedium() { return medium; }
         public void setMedium(String medium) { this.medium = medium; }
+
         public String getDescription() { return description; }
         public void setDescription(String description) { this.description = description; }
+
         public String getImageUrl() { return imageUrl; }
         public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+
         public Boolean getSold() { return sold; }
         public void setSold(Boolean sold) { this.sold = sold; }
+
+        public Integer getStock() { return stock; }
+        public void setStock(Integer stock) { this.stock = stock; }
+
         public String getCreatedAt() { return createdAt; }
         public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
     }

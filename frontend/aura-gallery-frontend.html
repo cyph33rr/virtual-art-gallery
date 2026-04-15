@@ -670,6 +670,8 @@
       <div class="modal-tab active" onclick="switchAuthTab('login',this)">Sign In</div>
       <div class="modal-tab" onclick="switchAuthTab('signup',this)">Join AURA</div>
     </div>
+    
+    <!-- LOGIN FORM -->
     <div id="login-form">
       <div class="form-group">
         <label class="form-label">Email</label>
@@ -686,14 +688,16 @@
       <div class="form-error" id="login-error"></div>
       <button class="btn-form" onclick="doLogin()">Enter Gallery</button>
     </div>
+    
+    <!-- SIGNUP FORM -->
     <div id="signup-form" style="display:none">
-      <div class="form-group">
-        <label class="form-label">Your Name</label>
-        <input class="form-input" id="signup-name" placeholder="Full name">
-      </div>
       <div class="form-group">
         <label class="form-label">Email</label>
         <input class="form-input" id="signup-email" type="email" placeholder="your@email.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Your Name</label>
+        <input class="form-input" id="signup-name" placeholder="Full name">
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
@@ -708,6 +712,7 @@
       </div>
       <div class="form-error" id="signup-error"></div>
       <button class="btn-form" onclick="doSignup()">Create Account</button>
+      </div>
     </div>
   </div>
 </div>
@@ -812,6 +817,9 @@ let currentArtwork = null;
 let currentFilter = 'all';
 let viewerMode = 'rotate';
 let currentEnv = 'gallery';
+let apiConnectionFailed = false;
+let retryAttempts = 0;
+const MAX_RETRY_ATTEMPTS = 3;
 
 // 3D
 let scene, camera, renderer, frame;
@@ -886,18 +894,27 @@ async function renderGallery() {
     if(!res.ok) throw new Error('Failed to fetch artworks');
     const data = await res.json();
     artworks = data || [];
-    const grid = document.getElementById('gallery-grid');
-    let list = artworks;
-    if(list.length === 0) {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:3rem;color:var(--grey)">No artworks yet. Be the first to share your work!</div>';
-      document.getElementById('stat-artworks').textContent = '0';
-      return;
-    }
-    grid.innerHTML = list.map(a => `
+    renderGalleryGrid(artworks);
+  } catch(e) { 
+    console.error('Gallery load error:', e);
+    // Fallback to default artworks
+    artworks = getDefaultArtworks();
+    renderGalleryGrid(artworks);
+  }
+}
+
+function renderGalleryGrid(list) {
+  const grid = document.getElementById('gallery-grid');
+  if(list.length === 0) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:3rem;color:var(--grey)">No artworks yet. Be the first to share your work!</div>';
+    document.getElementById('stat-artworks').textContent = '0';
+    return;
+  }
+  grid.innerHTML = list.map(a => `
     <div class="artwork-card" data-id="${a.id}">
       <div class="artwork-canvas-wrap">
         ${a.imageUrl
-          ? `<img class="artwork-img" src="http://localhost:8080${a.imageUrl}" alt="${a.title}" onerror="this.src='https://via.placeholder.com/400x300'">`
+          ? `<img class="artwork-img" src="${a.imageUrl}" alt="${a.title}" onerror="this.src='https://via.placeholder.com/400x300'">`
           : `<canvas id="art-${a.id}" width="400" height="300"></canvas>`}
         <div class="artwork-overlay">
           <div class="overlay-btns">
@@ -913,16 +930,12 @@ async function renderGallery() {
           <span class="artwork-price">${a.sold ? 'Sold' : '₹'+a.price.toLocaleString()}</span>
           <span class="artwork-cat">${a.category}</span>
         </div>
-        <div style="font-size:0.65rem;color:var(--gold);margin-top:0.5rem;letter-spacing:0.1em">
-          Stock: <strong>${a.stock || 1}</strong> ${(a.stock || 1) === 1 ? 'piece' : 'pieces'}
-        </div>
       </div>
     </div>
   `).join('');
   // Draw procedural art
   list.forEach(a => { if (!a.imageUrl) setTimeout(() => drawProceduralArt(a), 50); });
   document.getElementById('stat-artworks').textContent = artworks.length;
-  } catch(e) { console.error('Gallery load error:', e); document.getElementById('gallery-grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:3rem;color:#e06060">Error loading artworks: ' + e.message + '</div>'; }
 }
 
 function filterGallery(cat, btn) {
@@ -1307,7 +1320,7 @@ function buildPainting() {
   let tex;
   if(AW.imageUrl) {
     const img = new Image();
-    img.src = 'http://localhost:8080' + AW.imageUrl;
+    img.src = AW.imageUrl;
     img.crossOrigin = 'anonymous';
     tex = new THREE.Texture(img);
     img.onload = ()=>{ tex.needsUpdate=true; };
@@ -1497,6 +1510,7 @@ function selectPaymentMethod(method) {
 
 async function processCheckout(paymentMethod) {
   if(cart.length===0) return;
+  if(apiConnectionFailed) { showToast('⚠ Backend is offline. Cannot process payment at this time.'); return; }
   try {
     showToast('Processing payment via ' + (paymentMethod || 'selected method') + '...');
     const artworkIds = cart.map(c => c.id);
@@ -1522,7 +1536,7 @@ async function processCheckout(paymentMethod) {
     showPaymentSuccess(paymentMethod);
   } catch(e) { 
     console.error('Checkout error:', e);
-    showToast('Payment error: ' + e.message); 
+    showToast('Payment error: ' + e.message + ' (Backend may be offline)'); 
   }
 }
 
@@ -1562,7 +1576,7 @@ function updateCartUI() {
     </div>
   `).join('');
   const total=cart.reduce((s,c)=>s+c.price,0);
-  document.getElementById('cart-total').textContent='$'+total.toLocaleString();
+  document.getElementById('cart-total').textContent='₹'+total.toLocaleString();
   localStorage.setItem('aura_cart',JSON.stringify(cart));
 }
 
@@ -1583,94 +1597,98 @@ function switchAuthTab(tab, el) {
   document.getElementById('login-form').style.display=tab==='login'?'block':'none';
   document.getElementById('signup-form').style.display=tab==='signup'?'block':'none';
   document.getElementById('auth-title').textContent=tab==='login'?'Sign In':'Join AURA';
+  // Reset to stage 1 when switching tabs
+  if(tab==='login') {
+    document.getElementById('login-stage1').style.display='block';
+    document.getElementById('login-stage2').style.display='none';
+    document.getElementById('login-error').textContent='';
+    document.getElementById('login-otp-error').textContent='';
+  } else {
+    document.getElementById('signup-stage1').style.display='block';
+    document.getElementById('signup-stage2').style.display='none';
+    document.getElementById('signup-email-error').textContent='';
+    document.getElementById('signup-error').textContent='';
+  }
 }
 
+// ── LOGIN ─────────────────────────────
 async function doLogin() {
   const email=document.getElementById('login-email').value.trim();
   const pass=document.getElementById('login-pass').value;
-  const rememberMe = document.getElementById('remember-me').checked;
   const err=document.getElementById('login-error');
   err.textContent='';
   
   if(!email || !pass) { err.textContent = 'Please enter email and password'; return; }
   if(!email.includes('@')) { err.textContent = 'Invalid email format'; return; }
-  if(pass.length < 1) { err.textContent = 'Password required'; return; }
   
   try {
-    console.log('Attempting login with email:', email);
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password: pass })
     });
-    console.log('Response status:', res.status);
     const data = await res.json();
-    console.log('Response data:', data);
     
-    // Check response
-    if(!res.ok) { 
-      if(res.status === 401 || res.status === 404) {
-        err.textContent = 'Email or password is incorrect. Please check and try again.';
-      } else {
-        err.textContent = data.message || 'Login failed. Please try again.';
-      }
-      return; 
-    }
-    
-    // Verify token received
-    if(!data.token) {
-      err.textContent = 'No authentication token received. Please contact support.';
-      console.error('No token in response:', data);
+    if(!res.ok) {
+      err.textContent = data.message || 'Login failed';
       return;
     }
     
     setToken(data.token);
-    
-    // If remember me is checked, set expiration to 30 days from now
+    const rememberMe = document.getElementById('remember-me').checked;
     if(rememberMe) {
-      const expirationTime = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
+      const expirationTime = Date.now() + (30 * 24 * 60 * 60 * 1000);
       localStorage.setItem('aura_token_exp', expirationTime.toString());
       localStorage.setItem('aura_remember_me', 'true');
     }
     
     const user = { id: data.id, name: data.name, email: data.email, role: data.role };
-    setUser(user); 
+    setUser(user);
     closeAuth();
     renderGallery();
     showToast(`Welcome back, <span class="toast-gold">${user.name}</span>`);
-  } catch(e) { 
+  } catch(e) {
     console.error('Login error:', e);
-    err.textContent = 'Connection error: ' + e.message + '. Ensure backend is running on port 8080.'; 
+    err.textContent = 'Connection error: ' + e.message;
   }
 }
 
+// ── SIGNUP ────────────────────────────
 async function doSignup() {
-  const name=document.getElementById('signup-name').value.trim();
-  const email=document.getElementById('signup-email').value.trim();
-  const pass=document.getElementById('signup-pass').value;
-  const role=document.getElementById('signup-role').value;
-  const err=document.getElementById('signup-error');
+  const email = document.getElementById('signup-email').value.trim();
+  const name = document.getElementById('signup-name').value.trim();
+  const pass = document.getElementById('signup-pass').value;
+  const role = document.getElementById('signup-role').value;
+  const err = document.getElementById('signup-error');
   err.textContent='';
-  if(!name||!email||pass.length<6){ err.textContent='Please fill all fields (min 6 char password).'; return; }
+  
+  if(!email) { err.textContent = 'Please enter your email'; return; }
+  if(!email.includes('@')) { err.textContent = 'Invalid email format'; return; }
+  if(!name) { err.textContent = 'Please enter your name'; return; }
+  if(pass.length < 6) { err.textContent = 'Password must be at least 6 characters'; return; }
+  
   try {
-    console.log('Attempting signup to:', `${API_BASE}/auth/signup`);
     const res = await fetch(`${API_BASE}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password: pass, role })
     });
-    console.log('Response status:', res.status);
     const data = await res.json();
-    console.log('Response data:', data);
-    if(!res.ok) { err.textContent = data.message || 'Signup failed'; return; }
+    
+    if(!res.ok) {
+      err.textContent = data.message || 'Signup failed';
+      return;
+    }
+    
     setToken(data.token);
     const user = { id: data.id, name: data.name, email: data.email, role: data.role };
-    setUser(user); closeAuth();
+    setUser(user);
+    closeAuth();
     renderGallery();
     showToast(`Welcome to AURA, <span class="toast-gold">${name}</span>!`);
-  } catch(e) { 
+  } catch(e) {
     console.error('Signup error:', e);
-    err.textContent = 'Connection error: ' + e.message; 
+    err.textContent = 'Connection error: ' + e.message;
   }
 }
 
@@ -1694,6 +1712,8 @@ function logout() {
   localStorage.removeItem('aura_cart');
   localStorage.removeItem('aura_token_exp');
   localStorage.removeItem('aura_remember_me');
+  localStorage.removeItem('login_email');
+  localStorage.removeItem('signup_email');
   document.getElementById('nav-guest').style.display='flex';
   document.getElementById('nav-auth').style.display='none';
   document.getElementById('nav-upload').style.display='none';
@@ -1732,6 +1752,16 @@ let uploadedImg=null;
 
 async function uploadArtwork() {
   if(!currentUser||currentUser.role!=='ARTIST') { showToast('Only artists can upload'); return; }
+  
+  // CRITICAL: Check if user has valid token
+  const token = getToken();
+  if(!token) {
+    showToast('⚠ Not authenticated. Please log in again as an artist.');
+    openAuth();
+    return;
+  }
+  
+  console.log('Upload: User authenticated', { user: currentUser.name, role: currentUser.role, hasToken: !!token });
   const title=document.getElementById('up-title').value.trim();
   const price=parseFloat(document.getElementById('up-price').value);
   const category=document.getElementById('up-category').value;
@@ -1780,13 +1810,46 @@ async function uploadArtwork() {
     form.append('image', file);
     
     showToast('Uploading artwork...');
+    console.log('Upload request:', {
+      url: `${API_BASE}/artworks`,
+      token: token ? 'YES' : 'NO',
+      title: title,
+      price: price,
+      category: category
+    });
+    
     const res = await fetch(`${API_BASE}/artworks`, {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + getToken() },
+      headers: { 'Authorization': 'Bearer ' + token },
       body: form
     });
-    const data = await res.json();
-    if(!res.ok) { showToast('Upload failed: ' + (data.message || 'Unknown error')); return; }
+    
+    console.log('Upload response status:', res.status, res.statusText);
+    
+    // Handle the response
+    let responseText = '';
+    try {
+      responseText = await res.text();
+      console.log('Response body:', responseText);
+    } catch(e) {
+      console.error('Failed to read response:', e);
+    }
+    
+    let data = {};
+    if(responseText) {
+      try {
+        data = JSON.parse(responseText);
+      } catch(e) {
+        console.warn('Response is not JSON:', responseText);
+      }
+    }
+    
+    if(!res.ok) { 
+      const errorMsg = data.message || data.error || responseText || res.statusText || 'Unknown error';
+      console.error('Upload error:', errorMsg);
+      showToast('Upload failed: ' + errorMsg); 
+      return; 
+    }
     
     // Clear form
     document.getElementById('up-title').value='';
@@ -1801,7 +1864,10 @@ async function uploadArtwork() {
     renderGallery();
     const gallerySection = document.getElementById('gallery-section');
     if(gallerySection) gallerySection.scrollIntoView({behavior:'smooth'});
-  } catch(e) { showToast('Upload error: ' + e.message); console.error(e); }
+  } catch(e) { 
+    console.error('Upload error:', e);
+    showToast('Upload error: ' + e.message); 
+  }
 }
 
 function saveArtworks() { localStorage.setItem('aura_artworks',JSON.stringify(artworks)); }
@@ -1836,18 +1902,69 @@ window.addEventListener('resize',()=>{
   renderer.setSize(W,H);
 });
 
+// ── VISIBILITY & CONNECTION MONITORING ──
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) {
+    console.log('Page hidden');
+  } else {
+    console.log('Page visible again');
+    // When user returns to tab, attempt reconnnection
+    if(apiConnectionFailed && retryAttempts < MAX_RETRY_ATTEMPTS) {
+      console.log('User returned to page. Attempting reconnection...');
+      retryAttempts = 0; // Reset counter
+      renderGallery();
+    }
+  }
+});
+
+// Monitor online/offline status
+window.addEventListener('online', () => {
+  console.log('Connection restored');
+  if(apiConnectionFailed) {
+    showToast('✓ Connection restored. Refreshing data...');
+    retryAttempts = 0;
+    renderGallery();
+  }
+});
+
+window.addEventListener('offline', () => {
+  console.log('Connection lost');
+  showToast('⚠ You are offline. Using cached data.');
+});
+
 // ── INIT ──────────────────────────────
 if(currentUser) {
   setUser(currentUser);
   if(getToken()) {
     // Token exists but verify it's still valid
     const exp = localStorage.getItem('aura_token_exp');
-    if(!exp || Date.now() > parseInt(exp)) {
-      clearToken(); logout();
+    if(exp && Date.now() > parseInt(exp)) {
+      console.log('Token expired. Logging out user.');
+      clearToken();
+      logout();
     }
   }
 }
+
+// Load initial artworks
 renderGallery();
+
+// Periodic health check to ensure backend is still running (every 30 seconds)
+setInterval(() => {
+  if(!apiConnectionFailed) return; // Only check if we're already in failed state
+  
+  fetch(`${API_BASE}/artworks?limit=1`, { method: 'HEAD' })
+    .then(res => {
+      if(res.ok && apiConnectionFailed) {
+        console.log('Backend is back online');
+        retryAttempts = 0;
+        renderGallery();
+      }
+    })
+    .catch(() => {
+      // Still offline, do nothing
+    });
+}, 30000);
 </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 package com.aura.gallery.model;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
@@ -22,6 +23,19 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
+
+    // OTP Fields
+    @Column(length = 6)
+    private String otp;
+
+    @Column
+    private LocalDateTime otpCreatedAt;
+
+    @Column
+    private LocalDateTime otpExpiresAt;
+
+    @Column(nullable = false)
+    private Boolean isOtpVerified = false;
 
     public enum Role {
         ARTIST, COLLECTOR
@@ -66,6 +80,38 @@ public class User {
         return role;
     }
 
+    public String getOtp() {
+        return otp;
+    }
+
+    public void setOtp(String otp) {
+        this.otp = otp;
+    }
+
+    public LocalDateTime getOtpCreatedAt() {
+        return otpCreatedAt;
+    }
+
+    public void setOtpCreatedAt(LocalDateTime otpCreatedAt) {
+        this.otpCreatedAt = otpCreatedAt;
+    }
+
+    public LocalDateTime getOtpExpiresAt() {
+        return otpExpiresAt;
+    }
+
+    public void setOtpExpiresAt(LocalDateTime otpExpiresAt) {
+        this.otpExpiresAt = otpExpiresAt;
+    }
+
+    public Boolean getIsOtpVerified() {
+        return isOtpVerified;
+    }
+
+    public void setIsOtpVerified(Boolean isOtpVerified) {
+        this.isOtpVerified = isOtpVerified;
+    }
+
     // Setters
     public void setId(Long id) {
         this.id = id;
@@ -98,6 +144,10 @@ public class User {
         private String email;
         private String password;
         private Role role;
+        private String otp;
+        private LocalDateTime otpCreatedAt;
+        private LocalDateTime otpExpiresAt;
+        private Boolean isOtpVerified = false;
 
         public UserBuilder id(Long id) {
             this.id = id;
@@ -124,8 +174,33 @@ public class User {
             return this;
         }
 
+        public UserBuilder otp(String otp) {
+            this.otp = otp;
+            return this;
+        }
+
+        public UserBuilder otpCreatedAt(LocalDateTime otpCreatedAt) {
+            this.otpCreatedAt = otpCreatedAt;
+            return this;
+        }
+
+        public UserBuilder otpExpiresAt(LocalDateTime otpExpiresAt) {
+            this.otpExpiresAt = otpExpiresAt;
+            return this;
+        }
+
+        public UserBuilder isOtpVerified(Boolean isOtpVerified) {
+            this.isOtpVerified = isOtpVerified;
+            return this;
+        }
+
         public User build() {
-            return new User(id, name, email, password, role);
+            User user = new User(id, name, email, password, role);
+            user.setOtp(otp);
+            user.setOtpCreatedAt(otpCreatedAt);
+            user.setOtpExpiresAt(otpExpiresAt);
+            user.setIsOtpVerified(isOtpVerified);
+            return user;
         }
     }
 }
